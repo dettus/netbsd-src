@@ -12,6 +12,7 @@ __KERNEL_RCSID(0, "$NetBSD: i915_active.c,v 1.14 2022/03/16 23:32:52 riastradh E
 #include <linux/debugobjects.h>
 
 #include "gt/intel_context.h"
+#include "gt/intel_engine_heartbeat.h"
 #include "gt/intel_engine_pm.h"
 #include "gt/intel_ring.h"
 
@@ -38,7 +39,6 @@ struct active_node {
 	struct i915_active *ref;
 	struct rb_node node;
 	u64 timeline;
-	struct intel_engine_cs *engine;
 };
 
 static inline struct active_node *
@@ -57,13 +57,13 @@ static inline bool is_barrier(const struct i915_active_fence *active)
 static inline struct llist_node *barrier_to_ll(struct active_node *node)
 {
 	GEM_BUG_ON(!is_barrier(&node->base));
-	return &node->base.llist;
+	return (struct llist_node *)&node->base.cb.node;
 }
 
 static inline struct intel_engine_cs *
 __barrier_to_engine(struct active_node *node)
 {
-	return READ_ONCE(node->engine);
+	return (struct intel_engine_cs *)READ_ONCE(node->base.cb.node.prev);
 }
 
 static inline struct intel_engine_cs *
@@ -75,7 +75,8 @@ barrier_to_engine(struct active_node *node)
 
 static inline struct active_node *barrier_from_ll(struct llist_node *x)
 {
-	return container_of(x, struct active_node, base.llist);
+	return container_of((struct list_head *)x,
+			    struct active_node, base.cb.node);
 }
 
 #if IS_ENABLED(CONFIG_DRM_I915_DEBUG_GEM) && IS_ENABLED(CONFIG_DEBUG_OBJECTS)
@@ -367,7 +368,6 @@ void __i915_active_init(struct i915_active *ref,
 		ref->flags |= I915_ACTIVE_RETIRE_SLEEPS;
 
 	spin_lock_init(&ref->tree_lock);
-	DRM_INIT_WAITQUEUE(&ref->tree_wq, "i915act");
 #ifdef __NetBSD__
 	rb_tree_init(&ref->tree.rbr_tree, &active_rb_ops);
 #else
@@ -471,13 +471,23 @@ out:
 	return err;
 }
 
-void i915_active_set_exclusive(struct i915_active *ref, struct dma_fence *f)
+struct dma_fence *
+i915_active_set_exclusive(struct i915_active *ref, struct dma_fence *f)
 {
+	struct dma_fence *prev;
+
 	/* We expect the caller to manage the exclusive timeline ordering */
 	GEM_BUG_ON(i915_active_is_idle(ref));
 
-	if (!__i915_active_fence_set(&ref->excl, f))
+	rcu_read_lock();
+	prev = __i915_active_fence_set(&ref->excl, f);
+	if (prev)
+		prev = dma_fence_get_rcu(prev);
+	else
 		atomic_inc(&ref->count);
+	rcu_read_unlock();
+
+	return prev;
 }
 
 bool i915_active_acquire_if_busy(struct i915_active *ref)
@@ -523,6 +533,9 @@ static void enable_signaling(struct i915_active_fence *active)
 {
 	struct dma_fence *fence;
 
+	if (unlikely(is_barrier(active)))
+		return;
+
 	fence = i915_active_fence_get(active);
 	if (!fence)
 		return;
@@ -531,60 +544,135 @@ static void enable_signaling(struct i915_active_fence *active)
 	dma_fence_put(fence);
 }
 
-int i915_active_wait(struct i915_active *ref)
+static int flush_barrier(struct active_node *it)
+{
+	struct intel_engine_cs *engine;
+
+	if (likely(!is_barrier(&it->base)))
+		return 0;
+
+	engine = __barrier_to_engine(it);
+	smp_rmb(); /* serialise with add_active_barriers */
+	if (!is_barrier(&it->base))
+		return 0;
+
+	return intel_engine_flush_barriers(engine);
+}
+
+static int flush_lazy_signals(struct i915_active *ref)
 {
 	struct active_node *it, *n;
 	int err = 0;
+
+	enable_signaling(&ref->excl);
+	rbtree_postorder_for_each_entry_safe(it, n, &ref->tree, node) {
+		err = flush_barrier(it); /* unconnected idle barrier? */
+		if (err)
+			break;
+
+		enable_signaling(&it->base);
+	}
+
+	return err;
+}
+
+int i915_active_wait(struct i915_active *ref)
+{
+	int err;
 
 	might_sleep();
 
 	if (!i915_active_acquire_if_busy(ref))
 		return 0;
 
-	/* Flush lazy signals */
-	enable_signaling(&ref->excl);
-	rbtree_postorder_for_each_entry_safe(it, n, &ref->tree, node) {
-		if (is_barrier(&it->base)) /* unconnected idle barrier */
-			continue;
-
-		enable_signaling(&it->base);
-	}
 	/* Any fence added after the wait begins will not be auto-signaled */
-
+	err = flush_lazy_signals(ref);
 	i915_active_release(ref);
 	if (err)
 		return err;
 
-	spin_lock(&ref->tree_lock);
-	DRM_SPIN_WAIT_UNTIL(err, &ref->tree_wq, &ref->tree_lock,
-	    i915_active_is_idle(ref));
-	spin_unlock(&ref->tree_lock);
-	if (err)
-		return err;
+	if (wait_var_event_interruptible(ref, i915_active_is_idle(ref)))
+		return -EINTR;
 
 	flush_work(&ref->work);
 	return 0;
 }
 
-int i915_request_await_active(struct i915_request *rq, struct i915_active *ref)
+static int __await_active(struct i915_active_fence *active,
+			  int (*fn)(void *arg, struct dma_fence *fence),
+			  void *arg)
+{
+	struct dma_fence *fence;
+
+	if (is_barrier(active)) /* XXX flush the barrier? */
+		return 0;
+
+	fence = i915_active_fence_get(active);
+	if (fence) {
+		int err;
+
+		err = fn(arg, fence);
+		dma_fence_put(fence);
+		if (err < 0)
+			return err;
+	}
+
+	return 0;
+}
+
+static int await_active(struct i915_active *ref,
+			unsigned int flags,
+			int (*fn)(void *arg, struct dma_fence *fence),
+			void *arg)
 {
 	int err = 0;
 
+	/* We must always wait for the exclusive fence! */
 	if (rcu_access_pointer(ref->excl.fence)) {
-		struct dma_fence *fence;
-
-		rcu_read_lock();
-		fence = dma_fence_get_rcu_safe(&ref->excl.fence);
-		rcu_read_unlock();
-		if (fence) {
-			err = i915_request_await_dma_fence(rq, fence);
-			dma_fence_put(fence);
-		}
+		err = __await_active(&ref->excl, fn, arg);
+		if (err)
+			return err;
 	}
 
-	/* In the future we may choose to await on all fences */
+	if (flags & I915_ACTIVE_AWAIT_ALL && i915_active_acquire_if_busy(ref)) {
+		struct active_node *it, *n;
 
-	return err;
+		rbtree_postorder_for_each_entry_safe(it, n, &ref->tree, node) {
+			err = __await_active(&it->base, fn, arg);
+			if (err)
+				break;
+		}
+		i915_active_release(ref);
+		if (err)
+			return err;
+	}
+
+	return 0;
+}
+
+static int rq_await_fence(void *arg, struct dma_fence *fence)
+{
+	return i915_request_await_dma_fence(arg, fence);
+}
+
+int i915_request_await_active(struct i915_request *rq,
+			      struct i915_active *ref,
+			      unsigned int flags)
+{
+	return await_active(ref, flags, rq_await_fence, rq);
+}
+
+static int sw_await_fence(void *arg, struct dma_fence *fence)
+{
+	return i915_sw_fence_await_dma_fence(arg, fence, 0,
+					     GFP_NOWAIT | __GFP_NOWARN);
+}
+
+int i915_sw_fence_await_active(struct i915_sw_fence *fence,
+			       struct i915_active *ref,
+			       unsigned int flags)
+{
+	return await_active(ref, flags, sw_await_fence, fence);
 }
 
 void i915_active_fini(struct i915_active *ref)
@@ -594,7 +682,6 @@ void i915_active_fini(struct i915_active *ref)
 	GEM_BUG_ON(work_pending(&ref->work));
 	GEM_BUG_ON(!RB_EMPTY_ROOT(&ref->tree));
 	mutex_destroy(&ref->mutex);
-	spin_lock_destroy(&ref->tree_lock);
 }
 
 static inline bool is_idle_barrier(struct active_node *node, u64 idx)
@@ -662,7 +749,7 @@ static struct active_node *reuse_idle_barrier(struct i915_active *ref, u64 idx)
 	 * any idle-barriers on this timeline that we missed, or just use
 	 * the first pending barrier.
 	 */
-	for (p = prev; p; p = rb_next2(&ref->tree, p)) {
+	for (p = prev; p; p = rb_next(p)) {
 		struct active_node *node =
 			rb_entry(p, struct active_node, node);
 		struct intel_engine_cs *engine;
@@ -723,6 +810,7 @@ int i915_active_acquire_preallocate_barrier(struct i915_active *ref,
 	 * We can then use the preallocated nodes in
 	 * i915_active_acquire_barrier()
 	 */
+	KASSERT(mask != 0);
 	for_each_engine_masked(engine, gt, mask, tmp) {
 		u64 idx = engine->kernel_context->timeline->fence_context;
 		struct llist_node *prev = first;
@@ -736,7 +824,6 @@ int i915_active_acquire_preallocate_barrier(struct i915_active *ref,
 				goto unwind;
 			}
 
-			memset(node, 0, sizeof(*node));
 			RCU_INIT_POINTER(node->base.fence, NULL);
 			node->base.cb.func = node_retire;
 			node->timeline = idx;
@@ -754,7 +841,7 @@ int i915_active_acquire_preallocate_barrier(struct i915_active *ref,
 			 * for our tracking of the pending barrier.
 			 */
 			RCU_INIT_POINTER(node->base.fence, ERR_PTR(-EAGAIN));
-			node->engine = engine;
+			node->base.cb.node.prev = (void *)engine;
 			atomic_inc(&ref->count);
 		}
 		GEM_BUG_ON(rcu_access_pointer(node->base.fence) != ERR_PTR(-EAGAIN));

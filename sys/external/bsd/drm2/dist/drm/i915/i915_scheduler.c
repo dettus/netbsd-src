@@ -34,7 +34,7 @@ static DEFINE_SPINLOCK(schedule_lock);
 static const struct i915_request *
 node_to_request(const struct i915_sched_node *node)
 {
-	return const_container_of(node, struct i915_request, sched);
+	return container_of(node, const struct i915_request, sched);
 }
 
 static inline bool node_started(const struct i915_sched_node *node)
@@ -64,9 +64,7 @@ static void assert_priolists(struct intel_engine_execlists * const execlists)
 		   rb_first(&execlists->queue.rb_root));
 
 	last_prio = (INT_MAX >> I915_USER_PRIORITY_SHIFT) + 1;
-	for (rb = rb_first_cached(&execlists->queue);
-	     rb;
-	     rb = rb_next2(&execlists->queue.rb_root, rb)) {
+	for (rb = rb_first_cached(&execlists->queue); rb; rb = rb_next(rb)) {
 		const struct i915_priolist *p = to_priolist(rb);
 
 		GEM_BUG_ON(p->priority >= last_prio);
@@ -288,6 +286,8 @@ static void kick_submission(struct intel_engine_cs *engine,
 	if (!inflight)
 		goto unlock;
 
+	engine->execlists.queue_priority_hint = prio;
+
 	/*
 	 * If we are already the currently executing context, don't
 	 * bother evaluating if we should preempt ourselves.
@@ -295,7 +295,6 @@ static void kick_submission(struct intel_engine_cs *engine,
 	if (inflight->context == rq->context)
 		goto unlock;
 
-	engine->execlists.queue_priority_hint = prio;
 	if (need_preempt(prio, rq_prio(inflight)))
 		tasklet_hi_schedule(&engine->execlists.tasklet);
 
@@ -306,19 +305,16 @@ unlock:
 static void __i915_schedule(struct i915_sched_node *node,
 			    const struct i915_sched_attr *attr)
 {
+	const int prio = max(attr->priority, node->attr.priority);
 	struct intel_engine_cs *engine;
 	struct i915_dependency *dep, *p;
 	struct i915_dependency stack;
-	const int prio = attr->priority;
 	struct sched_cache cache;
 	LIST_HEAD(dfs);
 
 	/* Needed in order to use the temporary link inside i915_dependency */
 	lockdep_assert_held(&schedule_lock);
 	GEM_BUG_ON(prio == I915_PRIORITY_INVALID);
-
-	if (prio <= READ_ONCE(node->attr.priority))
-		return;
 
 	if (node_signaled(node))
 		return;
@@ -403,7 +399,7 @@ static void __i915_schedule(struct i915_sched_node *node,
 
 		GEM_BUG_ON(node_to_request(node)->engine != engine);
 
-		node->attr.priority = prio;
+		WRITE_ONCE(node->attr.priority, prio);
 
 		/*
 		 * Once the request is ready, it will be placed into the
@@ -441,6 +437,9 @@ void i915_schedule(struct i915_request *rq, const struct i915_sched_attr *attr)
 static void __bump_priority(struct i915_sched_node *node, unsigned int bump)
 {
 	struct i915_sched_attr attr = node->attr;
+
+	if (attr.priority & bump)
+		return;
 
 	attr.priority |= bump;
 	__i915_schedule(node, &attr);
@@ -512,7 +511,7 @@ bool __i915_sched_node_add_dependency(struct i915_sched_node *node,
 			node->flags |= I915_SCHED_HAS_SEMAPHORE_CHAIN;
 
 		/* All set, now publish. Beware the lockless walkers. */
-		list_add(&dep->signal_link, &node->signalers_list);
+		list_add_rcu(&dep->signal_link, &node->signalers_list);
 		list_add_rcu(&dep->wait_link, &signal->waiters_list);
 
 		/*
@@ -565,7 +564,7 @@ void i915_sched_node_fini(struct i915_sched_node *node)
 	list_for_each_entry_safe(dep, tmp, &node->signalers_list, signal_link) {
 		GEM_BUG_ON(!list_empty(&dep->dfs_link));
 
-		list_del(&dep->wait_link);
+		list_del_rcu(&dep->wait_link);
 		if (dep->flags & I915_DEPENDENCY_ALLOC)
 			i915_dependency_free(dep);
 	}
@@ -576,7 +575,7 @@ void i915_sched_node_fini(struct i915_sched_node *node)
 		GEM_BUG_ON(dep->signaler != node);
 		GEM_BUG_ON(!list_empty(&dep->dfs_link));
 
-		list_del(&dep->signal_link);
+		list_del_rcu(&dep->signal_link);
 		if (dep->flags & I915_DEPENDENCY_ALLOC)
 			i915_dependency_free(dep);
 	}
@@ -605,7 +604,8 @@ static struct i915_global_scheduler global = { {
 int __init i915_global_scheduler_init(void)
 {
 	global.slab_dependencies = KMEM_CACHE(i915_dependency,
-					      SLAB_HWCACHE_ALIGN);
+					      SLAB_HWCACHE_ALIGN |
+					      SLAB_TYPESAFE_BY_RCU);
 	if (!global.slab_dependencies)
 		return -ENOMEM;
 

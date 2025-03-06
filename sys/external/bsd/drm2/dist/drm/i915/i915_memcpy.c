@@ -42,7 +42,6 @@ __KERNEL_RCSID(0, "$NetBSD: i915_memcpy.c,v 1.4 2021/12/19 11:33:49 riastradh Ex
 
 static DEFINE_STATIC_KEY_FALSE(has_movntdqa);
 
-#ifdef CONFIG_AS_MOVNTDQA
 static void __memcpy_ntdqa(void *dst, const void *src, unsigned long len)
 {
 	kernel_fpu_begin();
@@ -100,10 +99,6 @@ static void __memcpy_ntdqu(void *dst, const void *src, unsigned long len)
 
 	kernel_fpu_end();
 }
-#else
-static void __memcpy_ntdqa(void *dst, const void *src, unsigned long len) {}
-static void __memcpy_ntdqu(void *dst, const void *src, unsigned long len) {}
-#endif
 
 /**
  * i915_memcpy_from_wc: perform an accelerated *aligned* read from WC
@@ -170,7 +165,6 @@ void i915_unaligned_memcpy_from_wc(void *dst, void *src, unsigned long len)
 
 void i915_memcpy_init_early(struct drm_i915_private *dev_priv)
 {
-#ifdef CONFIG_AS_MOVNTDQA
 	/*
 	 * Some hypervisors (e.g. KVM) don't support VEX-prefix instructions
 	 * emulation. So don't enable movntdqa in hypervisor guest.
@@ -178,5 +172,4 @@ void i915_memcpy_init_early(struct drm_i915_private *dev_priv)
 	if (static_cpu_has(X86_FEATURE_XMM4_1) &&
 	    !boot_cpu_has(X86_FEATURE_HYPERVISOR))
 		static_branch_enable(&has_movntdqa);
-#endif
 }

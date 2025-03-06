@@ -35,7 +35,6 @@ __KERNEL_RCSID(0, "$NetBSD: i915_gem.c,v 1.75 2021/12/19 12:32:15 riastradh Exp 
 #endif
 
 #include <drm/drm_vma_manager.h>
-#include <drm/i915_drm.h>
 #include <linux/dma-fence-array.h>
 #include <linux/kthread.h>
 #include <linux/dma-resv.h>
@@ -46,7 +45,6 @@ __KERNEL_RCSID(0, "$NetBSD: i915_gem.c,v 1.75 2021/12/19 12:32:15 riastradh Exp 
 #include <linux/pci.h>
 #include <linux/dma-buf.h>
 #include <linux/mman.h>
-#include <linux/uaccess.h>
 
 #include "display/intel_display.h"
 #include "display/intel_frontbuffer.h"
@@ -227,7 +225,7 @@ i915_gem_create(struct drm_file *file,
 	int ret;
 
 	GEM_BUG_ON(!is_power_of_2(mr->min_page_size));
-	size = ALIGN(*size_p, mr->min_page_size);
+	size = round_up(*size_p, mr->min_page_size);
 	if (size == 0)
 		return -EINVAL;
 
@@ -980,9 +978,6 @@ i915_gem_object_ggtt_pin(struct drm_i915_gem_object *obj,
 	struct i915_vma *vma;
 	int ret;
 
-	if (i915_gem_object_never_bind_ggtt(obj))
-		return ERR_PTR(-ENODEV);
-
 	if (flags & PIN_MAPPABLE &&
 	    (!view || view->type == I915_GGTT_VIEW_NORMAL)) {
 		/*
@@ -1047,6 +1042,12 @@ i915_gem_object_ggtt_pin(struct drm_i915_gem_object *obj,
 	ret = i915_vma_pin(vma, size, alignment, flags | PIN_GLOBAL);
 	if (ret)
 		return ERR_PTR(ret);
+
+	ret = i915_vma_wait_for_bind(vma);
+	if (ret) {
+		i915_vma_unpin(vma);
+		return ERR_PTR(ret);
+	}
 
 	return vma;
 }
@@ -1192,7 +1193,7 @@ err_unlock:
 
 		/* Minimal basic recovery for KMS */
 		ret = i915_ggtt_enable_hw(dev_priv);
-		i915_gem_restore_gtt_mappings(dev_priv);
+		i915_ggtt_resume(&dev_priv->ggtt);
 		i915_gem_restore_fences(&dev_priv->ggtt);
 		intel_init_clock_gating(dev_priv);
 	}
@@ -1242,7 +1243,7 @@ void i915_gem_driver_release(struct drm_i915_private *dev_priv)
 
 	i915_gem_drain_freed_objects(dev_priv);
 
-	WARN_ON(!list_empty(&dev_priv->gem.contexts.list));
+	drm_WARN_ON(&dev_priv->drm, !list_empty(&dev_priv->gem.contexts.list));
 }
 
 static void i915_gem_init__mm(struct drm_i915_private *i915)
@@ -1270,9 +1271,7 @@ void i915_gem_cleanup_early(struct drm_i915_private *dev_priv)
 	i915_gem_drain_freed_objects(dev_priv);
 	GEM_BUG_ON(!llist_empty(&dev_priv->mm.free_list));
 	GEM_BUG_ON(atomic_read(&dev_priv->mm.free_count));
-	WARN_ON(dev_priv->mm.shrink_count);
-	spin_lock_destroy(&dev_priv->fb_tracking.lock);
-	spin_lock_destroy(&dev_priv->mm.obj_lock);
+	drm_WARN_ON(&dev_priv->drm, dev_priv->mm.shrink_count);
 }
 
 int i915_gem_freeze(struct drm_i915_private *dev_priv)
@@ -1312,7 +1311,8 @@ int i915_gem_freeze_late(struct drm_i915_private *i915)
 
 	list_for_each_entry(obj, &i915->mm.shrink_list, mm.link) {
 		i915_gem_object_lock(obj);
-		WARN_ON(i915_gem_object_set_to_cpu_domain(obj, true));
+		drm_WARN_ON(&i915->drm,
+			    i915_gem_object_set_to_cpu_domain(obj, true));
 		i915_gem_object_unlock(obj);
 	}
 
@@ -1334,12 +1334,6 @@ void i915_gem_release(struct drm_device *dev, struct drm_file *file)
 	list_for_each_entry(request, &file_priv->mm.request_list, client_link)
 		request->file_priv = NULL;
 	spin_unlock(&file_priv->mm.lock);
-
-	/*
-	 * XXX This is probably too early -- need to defer with
-	 * callrcu; caller already defers free with kfree_rcu.
-	 */
-	spin_lock_destroy(&file_priv->mm.lock);
 }
 
 int i915_gem_open(struct drm_i915_private *i915, struct drm_file *file)

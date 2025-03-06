@@ -1,5 +1,6 @@
 /*	$NetBSD: i915_ioc32.c,v 1.3 2021/12/18 23:45:28 riastradh Exp $	*/
 
+
 /*
  * 32-bit ioctl compatibility routines for the i915 DRM.
  *
@@ -33,9 +34,10 @@ __KERNEL_RCSID(0, "$NetBSD: i915_ioc32.c,v 1.3 2021/12/18 23:45:28 riastradh Exp
 
 #include <linux/compat.h>
 
-#include <drm/i915_drm.h>
 #include <drm/drm_ioctl.h>
+
 #include "i915_drv.h"
+#include "i915_ioc32.h"
 
 struct drm_i915_getparam32 {
 	s32 param;
@@ -72,7 +74,7 @@ static drm_ioctl_compat_t *i915_compat_ioctls[] = {
 };
 
 /**
- * i915_compat_ioctl - handle the mistakes of the past
+ * i915_ioc32_compat_ioctl - handle the mistakes of the past
  * @filp: the file pointer
  * @cmd: the ioctl command (and encoded flags)
  * @arg: the ioctl argument (from userspace)
@@ -80,7 +82,7 @@ static drm_ioctl_compat_t *i915_compat_ioctls[] = {
  * Called whenever a 32-bit process running under a 64-bit kernel
  * performs an ioctl on /dev/dri/card<n>.
  */
-long i915_compat_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+long i915_ioc32_compat_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	unsigned int nr = DRM_IOCTL_NR(cmd);
 	drm_ioctl_compat_t *fn = NULL;

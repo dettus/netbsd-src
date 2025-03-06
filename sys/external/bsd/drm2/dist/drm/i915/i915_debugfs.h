@@ -1,5 +1,6 @@
 /*	$NetBSD: i915_debugfs.h,v 1.2 2021/12/18 23:45:28 riastradh Exp $	*/
 
+
 /* SPDX-License-Identifier: MIT */
 /*
  * Copyright © 2019 Intel Corporation
@@ -13,10 +14,10 @@ struct drm_connector;
 
 #ifdef CONFIG_DEBUG_FS
 int i915_debugfs_register(struct drm_i915_private *dev_priv);
-int i915_debugfs_connector_add(struct drm_connector *connector);
+void i915_debugfs_describe_obj(struct seq_file *m, struct drm_i915_gem_object *obj);
 #else
 static inline int i915_debugfs_register(struct drm_i915_private *dev_priv) { return 0; }
-static inline int i915_debugfs_connector_add(struct drm_connector *connector) { return 0; }
+static inline void i915_debugfs_describe_obj(struct seq_file *m, struct drm_i915_gem_object *obj) {}
 #endif
 
 #endif /* __I915_DEBUGFS_H__ */
