@@ -29,8 +29,6 @@
 #include <sys/cdefs.h>
 __KERNEL_RCSID(0, "$NetBSD: i915_suspend.c,v 1.3 2021/12/18 23:45:28 riastradh Exp $");
 
-#include <drm/i915_drm.h>
-
 #include "display/intel_fbc.h"
 #include "display/intel_gmbus.h"
 #include "display/intel_vga.h"
