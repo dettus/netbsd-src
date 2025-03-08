@@ -20,7 +20,6 @@ __KERNEL_RCSID(0, "$NetBSD: i915_utils.c,v 1.4 2021/12/19 11:37:41 riastradh Exp
 	" providing the dmesg log by booting with debug/verbose"	      \
 	" as in `boot -vx'."
 #else
-#define FDO_BUG_URL "https://gitlab.freedesktop.org/drm/intel/-/wikis/How-to-file-i915-bugs"
 #define FDO_BUG_MSG "Please file a bug on drm/i915; see " FDO_BUG_URL " for details."
 #endif
 

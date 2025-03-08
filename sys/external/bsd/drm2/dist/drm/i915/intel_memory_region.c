@@ -205,8 +205,6 @@ intel_memory_region_create(struct drm_i915_private *i915,
 	return mem;
 
 err_free:
-	mutex_destroy(&mem->mm_lock);
-	mutex_destroy(&mem->objects.lock);
 	kfree(mem);
 	return ERR_PTR(err);
 }
@@ -274,7 +272,9 @@ int intel_memory_regions_hw_probe(struct drm_i915_private *i915)
 
 		if (IS_ERR(mem)) {
 			err = PTR_ERR(mem);
-			DRM_ERROR("Failed to setup region(%d) type=%d\n", err, type);
+			drm_err(&i915->drm,
+				"Failed to setup region(%d) type=%d\n",
+				err, type);
 			goto out_cleanup;
 		}
 

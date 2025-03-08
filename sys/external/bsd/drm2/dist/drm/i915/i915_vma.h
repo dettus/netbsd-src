@@ -64,21 +64,21 @@ int __must_check i915_vma_move_to_active(struct i915_vma *vma,
 
 #ifdef __NetBSD__
 #define __i915_vma_flags(v) ((unsigned long *)&(v)->flags)
-#define __i915_vma_flags_const(v) ((const unsigned long *)&(v)->flags)
+#define __i915_vma_flags(v) ((const unsigned long *)&(v)->flags)
 #else
 #define __i915_vma_flags(v) ((unsigned long *)&(v)->flags.counter)
-#define __i915_vma_flags_const(v) ((const unsigned long *)&(v)->flags.counter)
+#define __i915_vma_flags(v) ((const unsigned long *)&(v)->flags.counter)
 #endif
 
 
 static inline bool i915_vma_is_ggtt(const struct i915_vma *vma)
 {
-	return test_bit(I915_VMA_GGTT_BIT, __i915_vma_flags_const(vma));
+	return test_bit(I915_VMA_GGTT_BIT, __i915_vma_flags(vma));
 }
 
 static inline bool i915_vma_has_ggtt_write(const struct i915_vma *vma)
 {
-	return test_bit(I915_VMA_GGTT_WRITE_BIT, __i915_vma_flags_const(vma));
+	return test_bit(I915_VMA_GGTT_WRITE_BIT, __i915_vma_flags(vma));
 }
 
 static inline void i915_vma_set_ggtt_write(struct i915_vma *vma)
@@ -97,7 +97,7 @@ void i915_vma_flush_writes(struct i915_vma *vma);
 
 static inline bool i915_vma_is_map_and_fenceable(const struct i915_vma *vma)
 {
-	return test_bit(I915_VMA_CAN_FENCE_BIT, __i915_vma_flags_const(vma));
+	return test_bit(I915_VMA_CAN_FENCE_BIT, __i915_vma_flags(vma));
 }
 
 static inline bool i915_vma_set_userfault(struct i915_vma *vma)
@@ -113,7 +113,7 @@ static inline void i915_vma_unset_userfault(struct i915_vma *vma)
 
 static inline bool i915_vma_has_userfault(const struct i915_vma *vma)
 {
-	return test_bit(I915_VMA_USERFAULT_BIT, __i915_vma_flags_const(vma));
+	return test_bit(I915_VMA_USERFAULT_BIT, __i915_vma_flags(vma));
 }
 
 static inline bool i915_vma_is_closed(const struct i915_vma *vma)
@@ -130,7 +130,7 @@ static inline u32 i915_ggtt_offset(const struct i915_vma *vma)
 	return lower_32_bits(vma->node.start);
 }
 
-static inline u32 i915_ggtt_pin_bias(const struct i915_vma *vma)
+static inline u32 i915_ggtt_pin_bias(struct i915_vma *vma)
 {
 	return i915_vm_to_ggtt(vma->vm)->pin_bias;
 }
@@ -250,12 +250,12 @@ int __must_check
 i915_vma_pin(struct i915_vma *vma, u64 size, u64 alignment, u64 flags);
 int i915_ggtt_pin(struct i915_vma *vma, u32 align, unsigned int flags);
 
-static inline int i915_vma_pin_count(struct i915_vma *vma)
+static inline int i915_vma_pin_count(const struct i915_vma *vma)
 {
 	return atomic_read(&vma->flags) & I915_VMA_PIN_MASK;
 }
 
-static inline bool i915_vma_is_pinned(struct i915_vma *vma)
+static inline bool i915_vma_is_pinned(const struct i915_vma *vma)
 {
 	return i915_vma_pin_count(vma);
 }
@@ -278,7 +278,7 @@ static inline void i915_vma_unpin(struct i915_vma *vma)
 	__i915_vma_unpin(vma);
 }
 
-static inline bool i915_vma_is_bound(struct i915_vma *vma,
+static inline bool i915_vma_is_bound(const struct i915_vma *vma,
 				     unsigned int where)
 {
 	return atomic_read(&vma->flags) & where;
@@ -396,6 +396,8 @@ void i915_vma_free(struct i915_vma *vma);
 struct i915_vma *i915_vma_make_unshrinkable(struct i915_vma *vma);
 void i915_vma_make_shrinkable(struct i915_vma *vma);
 void i915_vma_make_purgeable(struct i915_vma *vma);
+
+int i915_vma_wait_for_bind(struct i915_vma *vma);
 
 static inline int i915_vma_sync(struct i915_vma *vma)
 {
