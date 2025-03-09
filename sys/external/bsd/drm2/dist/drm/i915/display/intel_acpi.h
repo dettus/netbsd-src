@@ -19,6 +19,7 @@ void intel_register_dsm_handler(struct drm_i915_private *);
 void intel_register_dsm_handler(void);
 #endif
 void intel_unregister_dsm_handler(void);
+void intel_acpi_device_id_update(struct drm_i915_private *i915);
 #else
 #ifdef __NetBSD__
 static inline void intel_register_dsm_handler(struct drm_i915_private *i915) { return; }
@@ -26,6 +27,8 @@ static inline void intel_register_dsm_handler(struct drm_i915_private *i915) { r
 static inline void intel_register_dsm_handler(void) { return; }
 #endif
 static inline void intel_unregister_dsm_handler(void) { return; }
+static inline
+void intel_acpi_device_id_update(struct drm_i915_private *i915) { return; }
 #endif /* CONFIG_ACPI */
 
 #endif /* __INTEL_ACPI_H__ */
