@@ -40,7 +40,9 @@ __KERNEL_RCSID(0, "$NetBSD: intel_atomic.c,v 1.5 2021/12/19 12:24:36 riastradh E
 #include <drm/drm_plane_helper.h>
 
 #include "intel_atomic.h"
+#include "intel_cdclk.h"
 #include "intel_display_types.h"
+#include "intel_global_state.h"
 #include "intel_hdcp.h"
 #include "intel_psr.h"
 #include "intel_sprite.h"
@@ -61,16 +63,17 @@ int intel_digital_connector_atomic_get_property(struct drm_connector *connector,
 {
 	struct drm_device *dev = connector->dev;
 	struct drm_i915_private *dev_priv = to_i915(dev);
-	const struct intel_digital_connector_state *intel_conn_state =
-		const_container_of(state, struct intel_digital_connector_state, base);
+	struct intel_digital_connector_state *intel_conn_state =
+		to_intel_digital_connector_state(state);
 
 	if (property == dev_priv->force_audio_property)
 		*val = intel_conn_state->force_audio;
 	else if (property == dev_priv->broadcast_rgb_property)
 		*val = intel_conn_state->broadcast_rgb;
 	else {
-		DRM_DEBUG_ATOMIC("Unknown property [PROP:%d:%s]\n",
-				 property->base.id, property->name);
+		drm_dbg_atomic(&dev_priv->drm,
+			       "Unknown property [PROP:%d:%s]\n",
+			       property->base.id, property->name);
 		return -EINVAL;
 	}
 
@@ -106,8 +109,8 @@ int intel_digital_connector_atomic_set_property(struct drm_connector *connector,
 		return 0;
 	}
 
-	DRM_DEBUG_ATOMIC("Unknown property [PROP:%d:%s]\n",
-			 property->base.id, property->name);
+	drm_dbg_atomic(&dev_priv->drm, "Unknown property [PROP:%d:%s]\n",
+		       property->base.id, property->name);
 	return -EINVAL;
 }
 
@@ -183,6 +186,8 @@ intel_digital_connector_duplicate_state(struct drm_connector *connector)
 
 /**
  * intel_connector_needs_modeset - check if connector needs a modeset
+ * @state: the atomic state corresponding to this modeset
+ * @connector: the connector
  */
 bool
 intel_connector_needs_modeset(struct intel_atomic_state *state,
@@ -319,7 +324,8 @@ static void intel_atomic_setup_scaler(struct intel_crtc_scaler_state *scaler_sta
 		}
 	}
 
-	if (WARN(*scaler_id < 0, "Cannot find scaler for %s:%d\n", name, idx))
+	if (drm_WARN(&dev_priv->drm, *scaler_id < 0,
+		     "Cannot find scaler for %s:%d\n", name, idx))
 		return;
 
 	/* set scaler mode */
@@ -362,8 +368,8 @@ static void intel_atomic_setup_scaler(struct intel_crtc_scaler_state *scaler_sta
 		mode = SKL_PS_SCALER_MODE_DYN;
 	}
 
-	DRM_DEBUG_KMS("Attached scaler id %u.%u to %s:%d\n",
-		      intel_crtc->pipe, *scaler_id, name, idx);
+	drm_dbg_kms(&dev_priv->drm, "Attached scaler id %u.%u to %s:%d\n",
+		    intel_crtc->pipe, *scaler_id, name, idx);
 	scaler_state->scalers[*scaler_id].mode = mode;
 }
 
@@ -414,8 +420,9 @@ int intel_atomic_setup_scalers(struct drm_i915_private *dev_priv,
 
 	/* fail if required scalers > available scalers */
 	if (num_scalers_need > intel_crtc->num_scalers){
-		DRM_DEBUG_KMS("Too many scaling requests %d > %d\n",
-			num_scalers_need, intel_crtc->num_scalers);
+		drm_dbg_kms(&dev_priv->drm,
+			    "Too many scaling requests %d > %d\n",
+			    num_scalers_need, intel_crtc->num_scalers);
 		return -EINVAL;
 	}
 
@@ -460,8 +467,9 @@ int intel_atomic_setup_scalers(struct drm_i915_private *dev_priv,
 				plane = drm_plane_from_index(&dev_priv->drm, i);
 				state = drm_atomic_get_plane_state(drm_state, plane);
 				if (IS_ERR(state)) {
-					DRM_DEBUG_KMS("Failed to add [PLANE:%d] to drm_state\n",
-						plane->base.id);
+					drm_dbg_kms(&dev_priv->drm,
+						    "Failed to add [PLANE:%d] to drm_state\n",
+						    plane->base.id);
 					return PTR_ERR(state);
 				}
 			}
@@ -470,7 +478,8 @@ int intel_atomic_setup_scalers(struct drm_i915_private *dev_priv,
 			idx = plane->base.id;
 
 			/* plane on different crtc cannot be a scaler user of this crtc */
-			if (WARN_ON(intel_plane->pipe != intel_crtc->pipe))
+			if (drm_WARN_ON(&dev_priv->drm,
+					intel_plane->pipe != intel_crtc->pipe))
 				continue;
 
 			plane_state = intel_atomic_get_new_plane_state(intel_state,
@@ -496,23 +505,31 @@ intel_atomic_state_alloc(struct drm_device *dev)
 		return NULL;
 	}
 
-	i915_sw_fence_init(&state->commit_ready, intel_atomic_commit_ready);
-
 	return &state->base;
+}
+
+void intel_atomic_state_free(struct drm_atomic_state *_state)
+{
+	struct intel_atomic_state *state = to_intel_atomic_state(_state);
+
+	drm_atomic_state_default_release(&state->base);
+	kfree(state->global_objs);
+
+	i915_sw_fence_fini(&state->commit_ready);
+
+	kfree(state);
 }
 
 void intel_atomic_state_clear(struct drm_atomic_state *s)
 {
 	struct intel_atomic_state *state = to_intel_atomic_state(s);
+
 	drm_atomic_state_default_clear(&state->base);
+	intel_atomic_clear_global_state(state);
+
 	state->dpll_set = state->modeset = false;
 	state->global_state_changed = false;
 	state->active_pipes = 0;
-	memset(&state->min_cdclk, 0, sizeof(state->min_cdclk));
-	memset(&state->min_voltage_level, 0, sizeof(state->min_voltage_level));
-	memset(&state->cdclk.logical, 0, sizeof(state->cdclk.logical));
-	memset(&state->cdclk.actual, 0, sizeof(state->cdclk.actual));
-	state->cdclk.pipe = INVALID_PIPE;
 }
 
 struct intel_crtc_state *
@@ -527,7 +544,7 @@ intel_atomic_get_crtc_state(struct drm_atomic_state *state,
 	return to_intel_crtc_state(crtc_state);
 }
 
-int intel_atomic_lock_global_state(struct intel_atomic_state *state)
+int _intel_atomic_lock_global_state(struct intel_atomic_state *state)
 {
 	struct drm_i915_private *dev_priv = to_i915(state->base.dev);
 	struct intel_crtc *crtc;
@@ -546,7 +563,7 @@ int intel_atomic_lock_global_state(struct intel_atomic_state *state)
 	return 0;
 }
 
-int intel_atomic_serialize_global_state(struct intel_atomic_state *state)
+int _intel_atomic_serialize_global_state(struct intel_atomic_state *state)
 {
 	struct drm_i915_private *dev_priv = to_i915(state->base.dev);
 	struct intel_crtc *crtc;

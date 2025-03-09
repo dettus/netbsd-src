@@ -15,6 +15,7 @@ __KERNEL_RCSID(0, "$NetBSD: intel_acpi.c,v 1.8 2022/02/27 14:22:42 riastradh Exp
 
 #include "i915_drv.h"
 #include "intel_acpi.h"
+#include "intel_display_types.h"
 
 #ifdef __NetBSD__
 
@@ -34,7 +35,7 @@ static const guid_t intel_dsm_guid =
 	GUID_INIT(0x7ed873d3, 0xc2d0, 0x4e4f,
 		  0xa8, 0x54, 0x0f, 0x13, 0x17, 0xb0, 0x1c, 0x2c);
 
-static const char *intel_dsm_port_name(u8 id)
+static char *intel_dsm_port_name(u8 id)
 {
 	switch (id) {
 	case 0:
@@ -70,7 +71,7 @@ static const char *intel_dsm_port_name(u8 id)
 	}
 }
 
-static const char *intel_dsm_mux_type(u8 type)
+static char *intel_dsm_mux_type(u8 type)
 {
 	switch (type) {
 	case 0:
@@ -120,6 +121,7 @@ static void intel_dsm_platform_mux_info(acpi_handle dhandle)
 
 	ACPI_FREE(pkg);
 }
+
 
 #ifdef __NetBSD__
 static ACPI_HANDLE intel_dsm_pci_probe(ACPI_HANDLE dhandle)
