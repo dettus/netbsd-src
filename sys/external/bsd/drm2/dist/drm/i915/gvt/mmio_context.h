@@ -39,7 +39,7 @@
 #define __GVT_RENDER_H__
 
 struct engine_mmio {
-	int ring_id;
+	enum intel_engine_id id;
 	i915_reg_t reg;
 	u32 mask;
 	bool in_context;
@@ -47,7 +47,8 @@ struct engine_mmio {
 };
 
 void intel_gvt_switch_mmio(struct intel_vgpu *pre,
-			   struct intel_vgpu *next, int ring_id);
+			   struct intel_vgpu *next,
+			   const struct intel_engine_cs *engine);
 
 void intel_gvt_init_engine_mmio_context(struct intel_gvt *gvt);
 
