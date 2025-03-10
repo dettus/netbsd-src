@@ -130,27 +130,17 @@ static bool needs_idle_maps(struct drm_i915_private *i915)
 	return IS_GEN(i915, 5) && IS_MOBILE(i915) && intel_vtd_active();
 }
 
-static void ggtt_suspend_mappings(struct i915_ggtt *ggtt)
+void i915_ggtt_suspend(struct i915_ggtt *ggtt)
 {
-	struct drm_i915_private *i915 = ggtt->vm.i915;
+	struct i915_vma *vma;
 
-	/*
-	 * Don't bother messing with faults pre GEN6 as we have little
-	 * documentation supporting that it's a good idea.
-	 */
-	if (INTEL_GEN(i915) < 6)
-		return;
-
-	intel_gt_check_and_clear_faults(ggtt->vm.gt);
+	list_for_each_entry(vma, &ggtt->vm.bound_list, vm_link)
+		i915_vma_wait_for_bind(vma);
 
 	ggtt->vm.clear_range(&ggtt->vm, 0, ggtt->vm.total);
-
 	ggtt->invalidate(ggtt);
-}
 
-void i915_gem_suspend_gtt_mappings(struct drm_i915_private *i915)
-{
-	ggtt_suspend_mappings(&i915->ggtt);
+	intel_gt_check_and_clear_faults(ggtt->vm.gt);
 }
 
 void gen6_ggtt_invalidate(struct i915_ggtt *ggtt)
@@ -261,6 +251,7 @@ static void gen8_ggtt_insert_entries(struct i915_address_space *vm,
 	gen8_pte_t __iomem *gte;
 	gen8_pte_t __iomem *end;
 #endif
+	struct sgt_iter iter;
 	dma_addr_t addr;
 
 	/*
@@ -341,7 +332,6 @@ static void gen6_ggtt_insert_page(struct i915_address_space *vm,
  * reference offsets within the global GTT as well as accessible by the GPU
  * through the GMADR mapped BAR (i915->mm.gtt->gtt).
  */
-
 static void gen6_ggtt_insert_entries(struct i915_address_space *vm,
 				     struct i915_vma *vma,
 				     enum i915_cache_level level,
@@ -500,31 +490,6 @@ static void bxt_vtd_ggtt_insert_entries__BKL(struct i915_address_space *vm,
 	stop_machine(bxt_vtd_ggtt_insert_entries__cb, &arg, NULL);
 }
 
-struct clear_range {
-	struct i915_address_space *vm;
-	u64 start;
-	u64 length;
-};
-
-static int bxt_vtd_ggtt_clear_range__cb(void *_arg)
-{
-	struct clear_range *arg = _arg;
-
-	gen8_ggtt_clear_range(arg->vm, arg->start, arg->length);
-	bxt_vtd_ggtt_wa(arg->vm);
-
-	return 0;
-}
-
-static void bxt_vtd_ggtt_clear_range__BKL(struct i915_address_space *vm,
-					  u64 start,
-					  u64 length)
-{
-	struct clear_range arg = { vm, start, length };
-
-	stop_machine(bxt_vtd_ggtt_clear_range__cb, &arg, NULL);
-}
-
 static void gen6_ggtt_clear_range(struct i915_address_space *vm,
 				  u64 start, u64 length)
 {
@@ -624,7 +589,7 @@ static int ggtt_reserve_guc_top(struct i915_ggtt *ggtt)
 	u64 size;
 	int ret;
 
-	if (!USES_GUC(ggtt->vm.i915))
+	if (!intel_uc_uses_guc(&ggtt->vm.gt->uc))
 		return 0;
 
 	GEM_BUG_ON(ggtt->vm.total <= GUC_GGTT_TOP);
@@ -634,7 +599,8 @@ static int ggtt_reserve_guc_top(struct i915_ggtt *ggtt)
 				   GUC_GGTT_TOP, I915_COLOR_UNEVICTABLE,
 				   PIN_NOEVICT);
 	if (ret)
-		DRM_DEBUG_DRIVER("Failed to reserve top of GGTT for GuC\n");
+		drm_dbg(&ggtt->vm.i915->drm,
+			"Failed to reserve top of GGTT for GuC\n");
 
 	return ret;
 }
@@ -706,8 +672,9 @@ static int init_ggtt(struct i915_ggtt *ggtt)
 
 	/* Clear any non-preallocated blocks */
 	drm_mm_for_each_hole(entry, &ggtt->vm.mm, hole_start, hole_end) {
-		DRM_DEBUG_KMS("clearing unused GTT space: [%lx, %lx]\n",
-			      hole_start, hole_end);
+		drm_dbg_kms(&ggtt->vm.i915->drm,
+			    "clearing unused GTT space: [%lx, %lx]\n",
+			    hole_start, hole_end);
 		ggtt->vm.clear_range(&ggtt->vm, hole_start,
 				     hole_end - hole_start);
 	}
@@ -1086,8 +1053,8 @@ static int gen8_gmch_probe(struct i915_ggtt *ggtt)
 	    IS_CHERRYVIEW(i915) /* fails with concurrent use/update */) {
 		ggtt->vm.insert_entries = bxt_vtd_ggtt_insert_entries__BKL;
 		ggtt->vm.insert_page    = bxt_vtd_ggtt_insert_page__BKL;
-		if (ggtt->vm.clear_range != nop_clear_range)
-			ggtt->vm.clear_range = bxt_vtd_ggtt_clear_range__BKL;
+		ggtt->vm.bind_async_flags =
+			I915_VMA_GLOBAL_BIND | I915_VMA_LOCAL_BIND;
 	}
 
 	ggtt->invalidate = gen8_ggtt_invalidate;
@@ -1344,7 +1311,7 @@ static int ggtt_probe_hw(struct i915_ggtt *ggtt, struct intel_gt *gt)
 
 	if ((ggtt->vm.total - 1) >> 32) {
 		DRM_ERROR("We never expected a Global GTT with more than 32bits"
-			  " of address space! Found %"PRId64"M!\n",
+			  " of address space! Found %lldM!\n",
 			  ggtt->vm.total >> 20);
 		ggtt->vm.total = 1ULL << 32;
 		ggtt->mappable_end =
@@ -1353,15 +1320,15 @@ static int ggtt_probe_hw(struct i915_ggtt *ggtt, struct intel_gt *gt)
 
 	if (ggtt->mappable_end > ggtt->vm.total) {
 		DRM_ERROR("mappable aperture extends past end of GGTT,"
-			  " aperture=%pa, total=%"PRIx64"\n",
+			  " aperture=%pa, total=%llx\n",
 			  &ggtt->mappable_end, ggtt->vm.total);
 		ggtt->mappable_end = ggtt->vm.total;
 	}
 
 	/* GMADR is the PCI mmio aperture into the global GTT. */
-	DRM_DEBUG_DRIVER("GGTT size = %"PRIu64"M\n", ggtt->vm.total >> 20);
-	DRM_DEBUG_DRIVER("GMADR size = %"PRIu64"M\n", (u64)ggtt->mappable_end >> 20);
-	DRM_DEBUG_DRIVER("DSM size = %"PRIu64"M\n",
+	DRM_DEBUG_DRIVER("GGTT size = %lluM\n", ggtt->vm.total >> 20);
+	DRM_DEBUG_DRIVER("GMADR size = %lluM\n", (u64)ggtt->mappable_end >> 20);
+	DRM_DEBUG_DRIVER("DSM size = %lluM\n",
 			 (u64)resource_size(&intel_graphics_stolen_res) >> 20);
 
 	return 0;
@@ -1416,15 +1383,13 @@ void i915_ggtt_disable_guc(struct i915_ggtt *ggtt)
 	ggtt->invalidate(ggtt);
 }
 
-static void ggtt_restore_mappings(struct i915_ggtt *ggtt)
+void i915_ggtt_resume(struct i915_ggtt *ggtt)
 {
 	struct i915_vma *vma;
 	bool flush = false;
 	int open;
 
 	intel_gt_check_and_clear_faults(ggtt->vm.gt);
-
-	mutex_lock(&ggtt->vm.mutex);
 
 	/* First fill our portion of the GTT with scratch pages */
 	ggtt->vm.clear_range(&ggtt->vm, 0, ggtt->vm.total);
@@ -1452,19 +1417,10 @@ static void ggtt_restore_mappings(struct i915_ggtt *ggtt)
 	atomic_set(&ggtt->vm.open, open);
 	ggtt->invalidate(ggtt);
 
-	mutex_unlock(&ggtt->vm.mutex);
-
 	if (flush)
 		wbinvd_on_all_cpus();
-}
 
-void i915_gem_restore_gtt_mappings(struct drm_i915_private *i915)
-{
-	struct i915_ggtt *ggtt = &i915->ggtt;
-
-	ggtt_restore_mappings(ggtt);
-
-	if (INTEL_GEN(i915) >= 8)
+	if (INTEL_GEN(ggtt->vm.i915) >= 8)
 		setup_private_pat(ggtt->vm.gt->uncore);
 }
 
@@ -1505,6 +1461,7 @@ intel_rotate_pages(struct intel_rotation_info *rot_info,
 		   struct drm_i915_gem_object *obj)
 {
 	unsigned int size = intel_rotation_info_size(rot_info);
+	struct drm_i915_private *i915 = to_i915(obj->base.dev);
 	struct sg_table *st;
 	struct scatterlist *sg;
 	int ret = -ENOMEM;
@@ -1534,8 +1491,9 @@ err_sg_alloc:
 	kfree(st);
 err_st_alloc:
 
-	DRM_DEBUG_DRIVER("Failed to create rotated mapping for object size %zu! (%ux%u tiles, %u pages)\n",
-			 obj->base.size, rot_info->plane[0].width, rot_info->plane[0].height, size);
+	drm_dbg(&i915->drm, "Failed to create rotated mapping for object size %zu! (%ux%u tiles, %u pages)\n",
+		obj->base.size, rot_info->plane[0].width,
+		rot_info->plane[0].height, size);
 
 	return ERR_PTR(ret);
 }
@@ -1587,6 +1545,7 @@ intel_remap_pages(struct intel_remapped_info *rem_info,
 		  struct drm_i915_gem_object *obj)
 {
 	unsigned int size = intel_remapped_info_size(rem_info);
+	struct drm_i915_private *i915 = to_i915(obj->base.dev);
 	struct sg_table *st;
 	struct scatterlist *sg;
 	int ret = -ENOMEM;
@@ -1618,8 +1577,9 @@ err_sg_alloc:
 	kfree(st);
 err_st_alloc:
 
-	DRM_DEBUG_DRIVER("Failed to create remapped mapping for object size %zu! (%ux%u tiles, %u pages)\n",
-			 obj->base.size, rem_info->plane[0].width, rem_info->plane[0].height, size);
+	drm_dbg(&i915->drm, "Failed to create remapped mapping for object size %zu! (%ux%u tiles, %u pages)\n",
+		obj->base.size, rem_info->plane[0].width,
+		rem_info->plane[0].height, size);
 
 	return ERR_PTR(ret);
 }
@@ -1738,13 +1698,11 @@ fail:	if (st) {
 	struct scatterlist *sg, *iter;
 	unsigned int count = view->partial.size;
 	unsigned int offset;
-	int ret;
+	int ret = -ENOMEM;
 
 	st = kmalloc(sizeof(*st), GFP_KERNEL);
-	if (!st) {
-		ret = -ENOMEM;
+	if (!st)
 		goto err_st_alloc;
-	}
 
 	ret = sg_alloc_table(st, count, GFP_KERNEL);
 	if (ret)
@@ -1834,8 +1792,9 @@ i915_get_ggtt_vma_pages(struct i915_vma *vma)
 	if (IS_ERR(vma->pages)) {
 		ret = PTR_ERR(vma->pages);
 		vma->pages = NULL;
-		DRM_ERROR("Failed to get pages for VMA view type %u (%d)!\n",
-			  vma->ggtt_view.type, ret);
+		drm_err(&vma->vm->i915->drm,
+			"Failed to get pages for VMA view type %u (%d)!\n",
+			vma->ggtt_view.type, ret);
 	}
 	return ret;
 }

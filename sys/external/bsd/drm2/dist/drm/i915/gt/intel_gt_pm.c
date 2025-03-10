@@ -175,9 +175,7 @@ static void gt_sanitize(struct intel_gt *gt, bool force)
 
 void intel_gt_pm_fini(struct intel_gt *gt)
 {
-	intel_rps_fini(&gt->rps);
 	intel_rc6_fini(&gt->rc6);
-	intel_wakeref_fini(&gt->wakeref);
 }
 
 int intel_gt_resume(struct intel_gt *gt)
@@ -223,7 +221,7 @@ int intel_gt_resume(struct intel_gt *gt)
 		intel_engine_pm_get(engine);
 
 		engine->serial++; /* kernel context lost */
-		err = engine->resume(engine);
+		err = intel_engine_resume(engine);
 
 		intel_engine_pm_put(engine);
 		if (err) {

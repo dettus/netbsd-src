@@ -94,7 +94,8 @@ intel_engine_lookup_user(struct drm_i915_private *i915, u8 class, u8 instance)
 
 void intel_engine_add_user(struct intel_engine_cs *engine)
 {
-	llist_add(&engine->uabi_node.llist, &engine->i915->uabi_engines_llist);
+	llist_add((struct llist_node *)&engine->uabi_node,
+		  (struct llist_head *)&engine->i915->uabi_engines);
 }
 
 static const u8 uabi_classes[] = {
@@ -107,9 +108,9 @@ static const u8 uabi_classes[] = {
 static int engine_cmp(void *priv, struct list_head *A, struct list_head *B)
 {
 	const struct intel_engine_cs *a =
-		container_of(A, typeof(*a), uabi_node.list);
+		container_of((struct rb_node *)A, typeof(*a), uabi_node);
 	const struct intel_engine_cs *b =
-		container_of(B, typeof(*b), uabi_node.list);
+		container_of((struct rb_node *)B, typeof(*b), uabi_node);
 
 	if (uabi_classes[a->class] < uabi_classes[b->class])
 		return -1;
@@ -126,7 +127,7 @@ static int engine_cmp(void *priv, struct list_head *A, struct list_head *B)
 
 static struct llist_node *get_engines(struct drm_i915_private *i915)
 {
-	return llist_del_all(&i915->uabi_engines_llist);
+	return llist_del_all((struct llist_head *)&i915->uabi_engines);
 }
 
 static void sort_engines(struct drm_i915_private *i915,
@@ -136,8 +137,9 @@ static void sort_engines(struct drm_i915_private *i915,
 
 	llist_for_each_safe(pos, next, get_engines(i915)) {
 		struct intel_engine_cs *engine =
-			llist_entry(pos, typeof(*engine), uabi_node.llist);
-		list_add(&engine->uabi_node.list, engines);
+			container_of((struct rb_node *)pos, typeof(*engine),
+				     uabi_node);
+		list_add((struct list_head *)&engine->uabi_node, engines);
 	}
 	list_sort(NULL, engines, engine_cmp);
 }
@@ -257,7 +259,8 @@ void intel_engines_driver_register(struct drm_i915_private *i915)
 #endif
 	list_for_each_safe(it, next, &engines) {
 		struct intel_engine_cs *engine =
-			container_of(it, typeof(*engine), uabi_node.list);
+			container_of((struct rb_node *)it, typeof(*engine),
+				     uabi_node);
 		char old[sizeof(engine->name)];
 
 		if (intel_gt_has_init_error(engine->gt))
@@ -299,7 +302,7 @@ void intel_engines_driver_register(struct drm_i915_private *i915)
 #endif
 	}
 
-	if (IS_ENABLED(CONFIG_DRM_I915_SELFTEST) &&
+	if (IS_ENABLED(CONFIG_DRM_I915_SELFTESTS) &&
 	    IS_ENABLED(CONFIG_DRM_I915_DEBUG_GEM)) {
 		struct intel_engine_cs *engine;
 		unsigned int isolation;
@@ -346,7 +349,8 @@ void intel_engines_driver_register(struct drm_i915_private *i915)
 			}
 		}
 
-		if (WARN(errors, "Invalid UABI engine mapping found"))
+		if (drm_WARN(&i915->drm, errors,
+			     "Invalid UABI engine mapping found"))
 #ifdef __NetBSD__
 			rb_tree_init(&i915->uabi_engines.rbr_tree,
 			    &engine_ops);

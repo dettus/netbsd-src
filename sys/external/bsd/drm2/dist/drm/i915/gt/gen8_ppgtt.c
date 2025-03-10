@@ -13,6 +13,7 @@ __KERNEL_RCSID(0, "$NetBSD: gen8_ppgtt.c,v 1.10 2021/12/19 12:13:01 riastradh Ex
 #include "gen8_ppgtt.h"
 #include "i915_scatterlist.h"
 #include "i915_trace.h"
+#include "i915_pvinfo.h"
 #include "i915_vgpu.h"
 #include "intel_gt.h"
 #include "intel_gtt.h"
@@ -183,7 +184,6 @@ static void __gen8_ppgtt_cleanup(struct i915_address_space *vm,
 
 			__gen8_ppgtt_cleanup(vm, *pde, GEN8_PDES, lvl - 1);
 		} while (pde++, --count);
-		spin_lock_destroy(&pd->lock);
 	}
 
 	free_px(vm, pd);
@@ -252,11 +252,8 @@ static u64 __gen8_ppgtt_clear(struct i915_address_space * const vm,
 			start += count;
 		}
 
-		if (release_pd_entry(pd, idx, pt, scratch)) {
-			if (lvl)
-				spin_lock_destroy(&as_pd(pt)->lock);
+		if (release_pd_entry(pd, idx, pt, scratch))
 			free_px(vm, pt);
-		}
 	} while (idx++, --len);
 
 	return start;
@@ -368,15 +365,8 @@ static int __gen8_ppgtt_alloc(struct i915_address_space * const vm,
 	} while (idx++, --len);
 	spin_unlock(&pd->lock);
 out:
-	if (alloc) {
-		if (lvl) {
-			struct i915_page_directory *allocpd =
-			    container_of(alloc, struct i915_page_directory,
-				pt);
-			spin_lock_destroy(&allocpd->lock);
-		}
+	if (alloc)
 		free_px(vm, alloc);
-	}
 	return ret;
 }
 
@@ -762,7 +752,6 @@ gen8_alloc_top_pd(struct i915_address_space *vm)
 		return ERR_PTR(-ENOMEM);
 
 	if (unlikely(setup_page_dma(vm, px_base(pd)))) {
-		spin_lock_destroy(&pd->lock);
 		kfree(pd);
 		return ERR_PTR(-ENOMEM);
 	}

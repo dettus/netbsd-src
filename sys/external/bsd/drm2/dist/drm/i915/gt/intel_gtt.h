@@ -194,7 +194,7 @@ struct i915_page_directory {
 	__builtin_choose_expr( \
 	__builtin_types_compatible_p(typeof(x), type) || \
 	__builtin_types_compatible_p(typeof(x), const type), \
-	({ type __x = (type)__UNCONST(x); expr; }), \
+	({ type __x = (type)(x); expr; }), \
 	other)
 
 #define px_base(px) \
@@ -484,8 +484,7 @@ static inline void
 i915_vm_close(struct i915_address_space *vm)
 {
 	GEM_BUG_ON(!atomic_read(&vm->open));
-	if (atomic_dec_and_test(&vm->open))
-		__i915_vm_close(vm);
+	__i915_vm_close(vm);
 
 	i915_vm_put(vm);
 }
@@ -567,8 +566,8 @@ int i915_ppgtt_init_hw(struct intel_gt *gt);
 
 struct i915_ppgtt *i915_ppgtt_create(struct intel_gt *gt);
 
-void i915_gem_suspend_gtt_mappings(struct drm_i915_private *i915);
-void i915_gem_restore_gtt_mappings(struct drm_i915_private *i915);
+void i915_ggtt_suspend(struct i915_ggtt *gtt);
+void i915_ggtt_resume(struct i915_ggtt *ggtt);
 
 int setup_page_dma(struct i915_address_space *vm, struct i915_page_dma *p);
 void cleanup_page_dma(struct i915_address_space *vm, struct i915_page_dma *p);
