@@ -13,8 +13,6 @@ __KERNEL_RCSID(0, "$NetBSD: i915_gem_internal.c,v 1.4 2021/12/19 11:33:30 riastr
 #include <linux/slab.h>
 #include <linux/swiotlb.h>
 
-#include <drm/i915_drm.h>
-
 #include "i915_drv.h"
 #include "i915_gem.h"
 #include "i915_gem_object.h"

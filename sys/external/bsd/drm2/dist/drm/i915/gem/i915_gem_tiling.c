@@ -12,7 +12,6 @@ __KERNEL_RCSID(0, "$NetBSD: i915_gem_tiling.c,v 1.3 2021/12/19 11:33:49 riastrad
 #include <linux/bitmap.h>
 #include <linux/string.h>
 #include <linux/bitops.h>
-#include <drm/i915_drm.h>
 
 #include "i915_drv.h"
 #include "i915_gem.h"
@@ -190,7 +189,7 @@ i915_gem_object_fence_prepare(struct drm_i915_gem_object *obj,
 {
 	struct i915_ggtt *ggtt = &to_i915(obj->base.dev)->ggtt;
 	struct i915_vma *vma, *vn;
-	LINUX_LIST_HEAD(unbind);
+	LIST_HEAD(unbind);
 	int ret = 0;
 
 	if (tiling_mode == I915_TILING_NONE)

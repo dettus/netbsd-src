@@ -232,10 +232,8 @@ i915_mmu_notifier_find(struct i915_mm_struct *mm)
 	mutex_unlock(&mm->i915->mm_lock);
 	up_write(&mm->mm->mmap_sem);
 
-	if (mn && !IS_ERR(mn)) {
-		spin_lock_destroy(&mn->lock);
+	if (mn && !IS_ERR(mn))
 		kfree(mn);
-	}
 
 	return err ? ERR_PTR(err) : mm->mn;
 }
@@ -284,7 +282,6 @@ i915_mmu_notifier_free(struct i915_mmu_notifier *mn,
 		return;
 
 	mmu_notifier_unregister(&mn->mn, mm);
-	spin_lock_destroy(&mn->lock);
 	kfree(mn);
 }
 
@@ -649,14 +646,6 @@ static int i915_gem_userptr_get_pages(struct drm_i915_gem_object *obj)
 				      GFP_KERNEL |
 				      __GFP_NORETRY |
 				      __GFP_NOWARN);
-		/*
-		 * Using __get_user_pages_fast() with a read-only
-		 * access is questionable. A read-only page may be
-		 * COW-broken, and then this might end up giving
-		 * the wrong side of the COW..
-		 *
-		 * We may or may not care.
-		 */
 		if (pvec) /* defer to worker if malloc fails */
 			pinned = __get_user_pages_fast(obj->userptr.ptr,
 						       num_pages,
@@ -761,7 +750,7 @@ i915_gem_userptr_dmabuf_export(struct drm_i915_gem_object *obj)
 static const struct drm_i915_gem_object_ops i915_gem_userptr_ops = {
 	.flags = I915_GEM_OBJECT_HAS_STRUCT_PAGE |
 		 I915_GEM_OBJECT_IS_SHRINKABLE |
-		 I915_GEM_OBJECT_NO_GGTT |
+		 I915_GEM_OBJECT_NO_MMAP |
 		 I915_GEM_OBJECT_ASYNC_CANCEL,
 	.get_pages = i915_gem_userptr_get_pages,
 	.put_pages = i915_gem_userptr_put_pages,
@@ -826,6 +815,23 @@ i915_gem_userptr_ioctl(struct drm_device *dev,
 	if (args->flags & ~(I915_USERPTR_READ_ONLY |
 			    I915_USERPTR_UNSYNCHRONIZED))
 		return -EINVAL;
+
+	/*
+	 * XXX: There is a prevalence of the assumption that we fit the
+	 * object's page count inside a 32bit _signed_ variable. Let's document
+	 * this and catch if we ever need to fix it. In the meantime, if you do
+	 * spot such a local variable, please consider fixing!
+	 *
+	 * Aside from our own locals (for which we have no excuse!):
+	 * - sg_table embeds unsigned int for num_pages
+	 * - get_user_pages*() mixed ints with longs
+	 */
+
+	if (args->user_size >> PAGE_SHIFT > INT_MAX)
+		return -E2BIG;
+
+	if (overflows_type(args->user_size, obj->base.size))
+		return -E2BIG;
 
 	if (!args->user_size)
 		return -EINVAL;
@@ -896,5 +902,4 @@ int i915_gem_init_userptr(struct drm_i915_private *dev_priv)
 void i915_gem_cleanup_userptr(struct drm_i915_private *dev_priv)
 {
 	destroy_workqueue(dev_priv->mm.userptr_wq);
-	mutex_destroy(&dev_priv->mm_lock);
 }

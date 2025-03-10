@@ -174,7 +174,8 @@ rebuild_st:
 		last_pfn = page_to_pfn(page);
 
 		/* Check that the i965g/gm workaround works. */
-		WARN_ON((gfp & __GFP_DMA32) && (last_pfn >= 0x00100000UL));
+		drm_WARN_ON(&i915->drm,
+			    (gfp & __GFP_DMA32) && (last_pfn >= 0x00100000UL));
 #endif
 	}
 #ifndef __NetBSD__
@@ -207,7 +208,7 @@ rebuild_st:
 			max_segment = PAGE_SIZE;
 			goto rebuild_st;
 		} else {
-			dev_warn(i915->drm.dev,
+			dev_warn(&i915->drm.pdev->dev,
 				 "Failed to DMA remap %lu pages\n",
 				 page_count);
 			goto err_pages;

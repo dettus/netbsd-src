@@ -127,7 +127,6 @@ static int i915_gem_object_get_pages_phys(struct drm_i915_gem_object *obj)
 	if (WARN_ON(i915_gem_object_needs_bit17_swizzle(obj)))
 		return -EINVAL;
 
-
 	/*
 	 * Always aligning to the object size, allows a single allocation
 	 * to handle all possible callers, and given typical object sizes,
@@ -225,7 +224,7 @@ static int i915_gem_object_get_pages_phys(struct drm_i915_gem_object *obj)
 
 	intel_gt_chipset_flush(&to_i915(obj->base.dev)->gt);
 
-	__i915_gem_object_set_pages(obj, st, obj->base.size);
+	__i915_gem_object_set_pages(obj, st, sg->length);
 
 	return 0;
 
@@ -388,10 +387,11 @@ int i915_gem_object_attach_phys(struct drm_i915_gem_object *obj, int align)
 	/* Perma-pin (until release) the physical set of pages */
 	__i915_gem_object_pin_pages(obj);
 
-	if (!IS_ERR_OR_NULL(pages)) {
+	if (!IS_ERR_OR_NULL(pages))
 		i915_gem_shmem_ops.put_pages(obj, pages);
-		i915_gem_object_release_memory_region(obj);
-	}
+
+	i915_gem_object_release_memory_region(obj);
+
 	mutex_unlock(&obj->mm.lock);
 	return 0;
 

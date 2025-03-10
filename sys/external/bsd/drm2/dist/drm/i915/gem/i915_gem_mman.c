@@ -322,7 +322,8 @@ static vm_fault_t vm_fault_cpu(struct vm_fault *vmf)
 	int err;
 
 	/* Sanity check that we allow writing into this object */
-	if (unlikely(i915_gem_object_is_readonly(obj) && write))
+	if (unlikely(i915_gem_object_is_readonly(obj) &&
+		     area->vm_flags & VM_WRITE))
 #ifdef __NetBSD__
 		return EINVAL;	/* SIGBUS */
 #else
@@ -388,7 +389,7 @@ static vm_fault_t vm_fault_cpu(struct vm_fault *vmf)
 			  obj->mm.pages->sgl, iomap);
 #endif
 
-	if (write) {
+	if (area->vm_flags & VM_WRITE) {
 		GEM_BUG_ON(!i915_gem_object_has_pinned_pages(obj));
 		obj->mm.dirty = true;
 	}
@@ -894,8 +895,7 @@ __assign_mmap_offset(struct drm_file *file,
 	if (!obj)
 		return -ENOENT;
 
-	if (mmap_type == I915_MMAP_TYPE_GTT &&
-	    i915_gem_object_never_bind_ggtt(obj)) {
+	if (i915_gem_object_never_mmap(obj)) {
 		err = -ENODEV;
 		goto out;
 	}
@@ -1146,7 +1146,7 @@ static struct file *mmap_singleton(struct drm_i915_private *i915)
 	struct file *file;
 
 	rcu_read_lock();
-	file = i915->gem.mmap_singleton;
+	file = READ_ONCE(i915->gem.mmap_singleton);
 	if (file && !get_file_rcu(file))
 		file = NULL;
 	rcu_read_unlock();

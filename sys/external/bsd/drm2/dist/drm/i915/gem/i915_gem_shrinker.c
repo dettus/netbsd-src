@@ -17,7 +17,6 @@ __KERNEL_RCSID(0, "$NetBSD: i915_gem_shrinker.c,v 1.3 2021/12/19 11:33:49 riastr
 #include <linux/pci.h>
 #include <linux/dma-buf.h>
 #include <linux/vmalloc.h>
-#include <drm/i915_drm.h>
 
 #include "i915_trace.h"
 
@@ -261,8 +260,7 @@ unsigned long i915_gem_shrink_all(struct drm_i915_private *i915)
 	with_intel_runtime_pm(&i915->runtime_pm, wakeref) {
 		freed = i915_gem_shrink(i915, -1UL, NULL,
 					I915_SHRINK_BOUND |
-					I915_SHRINK_UNBOUND |
-					I915_SHRINK_ACTIVE);
+					I915_SHRINK_UNBOUND);
 	}
 
 	return freed;
@@ -341,7 +339,6 @@ i915_gem_shrinker_oom(struct notifier_block *nb, unsigned long event, void *ptr)
 	freed_pages = 0;
 	with_intel_runtime_pm(&i915->runtime_pm, wakeref)
 		freed_pages += i915_gem_shrink(i915, -1UL, NULL,
-					       I915_SHRINK_ACTIVE |
 					       I915_SHRINK_BOUND |
 					       I915_SHRINK_UNBOUND |
 					       I915_SHRINK_WRITEBACK);
@@ -408,26 +405,28 @@ void i915_gem_driver_register__shrinker(struct drm_i915_private *i915)
 	i915->mm.shrinker.count_objects = i915_gem_shrinker_count;
 	i915->mm.shrinker.seeks = DEFAULT_SEEKS;
 	i915->mm.shrinker.batch = 4096;
-	WARN_ON(register_shrinker(&i915->mm.shrinker));
+	drm_WARN_ON(&i915->drm, register_shrinker(&i915->mm.shrinker));
 
 	i915->mm.oom_notifier.notifier_call = i915_gem_shrinker_oom;
-	WARN_ON(register_oom_notifier(&i915->mm.oom_notifier));
+	drm_WARN_ON(&i915->drm, register_oom_notifier(&i915->mm.oom_notifier));
 
 	i915->mm.vmap_notifier.notifier_call = i915_gem_shrinker_vmap;
-	WARN_ON(register_vmap_purge_notifier(&i915->mm.vmap_notifier));
+	drm_WARN_ON(&i915->drm,
+		    register_vmap_purge_notifier(&i915->mm.vmap_notifier));
 }
 
 void i915_gem_driver_unregister__shrinker(struct drm_i915_private *i915)
 {
-	WARN_ON(unregister_vmap_purge_notifier(&i915->mm.vmap_notifier));
-	WARN_ON(unregister_oom_notifier(&i915->mm.oom_notifier));
+	drm_WARN_ON(&i915->drm,
+		    unregister_vmap_purge_notifier(&i915->mm.vmap_notifier));
+	drm_WARN_ON(&i915->drm,
+		    unregister_oom_notifier(&i915->mm.oom_notifier));
 	unregister_shrinker(&i915->mm.shrinker);
 }
 
 void i915_gem_shrinker_taints_mutex(struct drm_i915_private *i915,
 				    struct mutex *mutex)
 {
-#if IS_ENABLED(CONFIG_LOCKDEP)
 	bool unlock = false;
 
 	if (!IS_ENABLED(CONFIG_LOCKDEP))
@@ -448,7 +447,6 @@ void i915_gem_shrinker_taints_mutex(struct drm_i915_private *i915,
 
 	if (unlock)
 		mutex_release(&i915->drm.struct_mutex.dep_map, _RET_IP_);
-#endif
 }
 
 #define obj_to_i915(obj__) to_i915((obj__)->base.dev)

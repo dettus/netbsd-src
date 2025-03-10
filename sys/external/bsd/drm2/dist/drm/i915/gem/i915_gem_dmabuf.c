@@ -19,9 +19,7 @@ __KERNEL_RCSID(0, "$NetBSD: i915_gem_dmabuf.c,v 1.7 2024/05/20 11:34:45 riastrad
 
 static struct drm_i915_gem_object *dma_buf_to_obj(struct dma_buf *buf)
 {
-	struct drm_gem_object *obj = buf->priv;
-
-	return to_intel_bo(obj);
+	return to_intel_bo(buf->priv);
 }
 
 static struct sg_table *i915_gem_map_dma_buf(struct dma_buf_attachment *attachment,
@@ -64,7 +62,9 @@ static struct sg_table *i915_gem_map_dma_buf(struct dma_buf_attachment *attachme
 	}
 #endif
 
-	if (!dma_map_sg(attachment->dev, st->sgl, st->nents, dir)) {
+	if (!dma_map_sg_attrs(attachment->dev,
+			      st->sgl, st->nents, dir,
+			      DMA_ATTR_SKIP_CPU_SYNC)) {
 		ret = -ENOMEM;
 		goto err_free_sg;
 	}
@@ -87,7 +87,9 @@ static void i915_gem_unmap_dma_buf(struct dma_buf_attachment *attachment,
 {
 	struct drm_i915_gem_object *obj = dma_buf_to_obj(attachment->dmabuf);
 
-	dma_unmap_sg(attachment->dev, sg->sgl, sg->nents, dir);
+	dma_unmap_sg_attrs(attachment->dev,
+			   sg->sgl, sg->nents, dir,
+			   DMA_ATTR_SKIP_CPU_SYNC);
 	sg_free_table(sg);
 	kfree(sg);
 
@@ -273,7 +275,7 @@ struct drm_gem_object *i915_gem_prime_import(struct drm_device *dev,
 	}
 
 	/* need to attach */
-	attach = dma_buf_attach(dma_buf, dev->dmat);
+	attach = dma_buf_attach(dma_buf, dev->dev);
 	if (IS_ERR(attach))
 		return ERR_CAST(attach);
 
