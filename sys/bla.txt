@@ -1,0 +1,10 @@
+external/bsd/drm2/dist/drm/i915/gt/gen7_renderclear.c
+        external/bsd/drm2/dist/drm/i915/gt/gen7_renderclear.h
+        external/bsd/drm2/dist/drm/i915/gt/hsw_clear_kernel.c
+        external/bsd/drm2/dist/drm/i915/gt/intel_context_param.c
+        external/bsd/drm2/dist/drm/i915/gt/intel_context_param.h
+        external/bsd/drm2/dist/drm/i915/gt/intel_context_sseu.c
+        external/bsd/drm2/dist/drm/i915/gt/ivb_clear_kernel.c
+        external/bsd/drm2/dist/drm/i915/gt/selftest_ring_submission.c
+        external/bsd/drm2/dist/drm/i915/gt/sysfs_engines.c
+        external/bsd/drm2/dist/drm/i915/gt/sysfs_engines.h
