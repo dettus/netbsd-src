@@ -222,7 +222,7 @@ static void guc_wq_item_append(struct intel_guc *guc,
 static void guc_add_request(struct intel_guc *guc, struct i915_request *rq)
 {
 	struct intel_engine_cs *engine = rq->engine;
-	u32 ctx_desc = lower_32_bits(rq->context->lrc_desc);
+	u32 ctx_desc = rq->context->lrc.ccid;
 	u32 ring_tail = intel_ring_set_tail(rq->ring, rq->tail) / sizeof(u64);
 
 	guc_wq_item_append(guc, engine->guc_id, ctx_desc,
@@ -461,9 +461,7 @@ static void guc_reset_cancel(struct intel_engine_cs *engine)
 
 	/* Mark all executing requests as skipped. */
 	list_for_each_entry(rq, &engine->active.requests, sched.link) {
-		if (!i915_request_signaled(rq))
-			dma_fence_set_error(&rq->fence, -EIO);
-
+		i915_request_set_error_once(rq, -EIO);
 		i915_request_mark_complete(rq);
 	}
 
@@ -486,7 +484,7 @@ static void guc_reset_cancel(struct intel_engine_cs *engine)
 	/* Remaining _unready_ requests will be nop'ed when submitted */
 
 	execlists->queue_priority_hint = INT_MIN;
-	i915_sched_init(execlists);
+	execlists->queue = RB_ROOT_CACHED;
 
 	spin_unlock_irqrestore(&engine->active.lock, flags);
 }
@@ -550,7 +548,6 @@ err_pool:
 
 void intel_guc_submission_fini(struct intel_guc *guc)
 {
-	spin_lock_destroy(&guc->wq_lock);
 	if (guc->stage_desc_pool) {
 		guc_proc_desc_destroy(guc);
 		guc_workqueue_destroy(guc);
@@ -666,12 +663,9 @@ void intel_guc_submission_disable(struct intel_guc *guc)
 	guc_proc_desc_fini(guc);
 }
 
-static bool __guc_submission_support(struct intel_guc *guc)
+static bool __guc_submission_selected(struct intel_guc *guc)
 {
-	/* XXX: GuC submission is unavailable for now */
-	return false;
-
-	if (!intel_guc_is_supported(guc))
+	if (!intel_guc_submission_is_supported(guc))
 		return false;
 
 	return i915_modparams.enable_guc & ENABLE_GUC_SUBMISSION;
@@ -679,7 +673,7 @@ static bool __guc_submission_support(struct intel_guc *guc)
 
 void intel_guc_submission_init_early(struct intel_guc *guc)
 {
-	guc->submission_supported = __guc_submission_support(guc);
+	guc->submission_selected = __guc_submission_selected(guc);
 }
 
 bool intel_engine_in_guc_submission_mode(const struct intel_engine_cs *engine)

@@ -31,8 +31,11 @@ struct intel_gt;
  * |            |                 SELECTED                          |
  * +------------+-               /   |   \                         -+
  * |            |    MISSING <--/    |    \--> ERROR                |
- * |   fetch    |                    |                              |
- * |            |        /------> AVAILABLE <---<-----------\       |
+ * |   fetch    |                    V                              |
+ * |            |                 AVAILABLE                         |
+ * +------------+-                   |                             -+
+ * |   init     |                    V                              |
+ * |            |        /------> LOADABLE <----<-----------\       |
  * +------------+-       \         /    \        \           \     -+
  * |            |         FAIL <--<      \--> TRANSFERRED     \     |
  * |   upload   |                  \           /   \          /     |
@@ -48,6 +51,7 @@ enum intel_uc_fw_status {
 	INTEL_UC_FIRMWARE_MISSING, /* blob not found on the system */
 	INTEL_UC_FIRMWARE_ERROR, /* invalid format or version */
 	INTEL_UC_FIRMWARE_AVAILABLE, /* blob found and copied in mem */
+	INTEL_UC_FIRMWARE_LOADABLE, /* all fw-required objects are ready */
 	INTEL_UC_FIRMWARE_FAIL, /* failed to xfer or init/auth the fw */
 	INTEL_UC_FIRMWARE_TRANSFERRED, /* dma xfer done */
 	INTEL_UC_FIRMWARE_RUNNING /* init/auth done */
@@ -117,6 +121,8 @@ const char *intel_uc_fw_status_repr(enum intel_uc_fw_status status)
 		return "ERROR";
 	case INTEL_UC_FIRMWARE_AVAILABLE:
 		return "AVAILABLE";
+	case INTEL_UC_FIRMWARE_LOADABLE:
+		return "LOADABLE";
 	case INTEL_UC_FIRMWARE_FAIL:
 		return "FAIL";
 	case INTEL_UC_FIRMWARE_TRANSFERRED:
@@ -145,6 +151,7 @@ static inline int intel_uc_fw_status_to_error(enum intel_uc_fw_status status)
 	case INTEL_UC_FIRMWARE_SELECTED:
 		return -ESTALE;
 	case INTEL_UC_FIRMWARE_AVAILABLE:
+	case INTEL_UC_FIRMWARE_LOADABLE:
 	case INTEL_UC_FIRMWARE_TRANSFERRED:
 	case INTEL_UC_FIRMWARE_RUNNING:
 		return 0;
@@ -186,6 +193,11 @@ static inline bool intel_uc_fw_is_available(struct intel_uc_fw *uc_fw)
 	return __intel_uc_fw_status(uc_fw) >= INTEL_UC_FIRMWARE_AVAILABLE;
 }
 
+static inline bool intel_uc_fw_is_loadable(struct intel_uc_fw *uc_fw)
+{
+	return __intel_uc_fw_status(uc_fw) >= INTEL_UC_FIRMWARE_LOADABLE;
+}
+
 static inline bool intel_uc_fw_is_loaded(struct intel_uc_fw *uc_fw)
 {
 	return __intel_uc_fw_status(uc_fw) >= INTEL_UC_FIRMWARE_TRANSFERRED;
@@ -204,7 +216,7 @@ static inline bool intel_uc_fw_is_overridden(const struct intel_uc_fw *uc_fw)
 static inline void intel_uc_fw_sanitize(struct intel_uc_fw *uc_fw)
 {
 	if (intel_uc_fw_is_loaded(uc_fw))
-		intel_uc_fw_change_status(uc_fw, INTEL_UC_FIRMWARE_AVAILABLE);
+		intel_uc_fw_change_status(uc_fw, INTEL_UC_FIRMWARE_LOADABLE);
 }
 
 static inline u32 __intel_uc_fw_get_upload_size(struct intel_uc_fw *uc_fw)
