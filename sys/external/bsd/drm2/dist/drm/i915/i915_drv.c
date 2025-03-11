@@ -1642,6 +1642,8 @@ static int i915_pm_restore(struct device *kdev)
 	return i915_pm_resume(kdev);
 }
 
+#endif
+
 #ifndef __NetBSD__		/* XXX runtime pm */
 static int intel_runtime_suspend(struct device *kdev)
 {
