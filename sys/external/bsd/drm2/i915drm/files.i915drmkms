@@ -99,6 +99,7 @@ file	external/bsd/drm2/dist/drm/i915/display/intel_color.c	i915drmkms
 file	external/bsd/drm2/dist/drm/i915/display/intel_combo_phy.c	i915drmkms
 file	external/bsd/drm2/dist/drm/i915/display/intel_connector.c	i915drmkms
 file	external/bsd/drm2/dist/drm/i915/display/intel_crt.c	i915drmkms
+file	external/bsd/drm2/dist/drm/i915/display/intel_csr.c	i915drmkms
 file	external/bsd/drm2/dist/drm/i915/display/intel_ddi.c	i915drmkms
 file	external/bsd/drm2/dist/drm/i915/display/intel_display.c	i915drmkms
 file	external/bsd/drm2/dist/drm/i915/display/intel_display_power.c	i915drmkms
@@ -239,7 +240,6 @@ file	external/bsd/drm2/dist/drm/i915/i915_user_extensions.c	i915drmkms
 file	external/bsd/drm2/dist/drm/i915/i915_utils.c	i915drmkms
 file	external/bsd/drm2/dist/drm/i915/i915_vgpu.c	i915drmkms
 file	external/bsd/drm2/dist/drm/i915/i915_vma.c	i915drmkms
-file	external/bsd/drm2/dist/drm/i915/intel_csr.c	i915drmkms
 file	external/bsd/drm2/dist/drm/i915/intel_device_info.c	i915drmkms
 file	external/bsd/drm2/dist/drm/i915/intel_memory_region.c	i915drmkms
 file	external/bsd/drm2/dist/drm/i915/intel_pch.c	i915drmkms
