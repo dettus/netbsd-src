@@ -488,7 +488,7 @@ static u32 scale(u32 source_val,
 	return target_val;
 }
 
-if IS_ENABLED(CONFIG_BACKLIGHT_CLASS_DEVICE)
+#if IS_ENABLED(CONFIG_BACKLIGHT_CLASS_DEVICE)
 /* Scale user_level in range [0..user_max] to [hw_min..hw_max]. */
 static inline u32 scale_user_to_hw(struct intel_connector *connector,
 				   u32 user_level, u32 user_max)
