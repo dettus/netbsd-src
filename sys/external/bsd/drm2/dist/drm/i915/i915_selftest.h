@@ -27,6 +27,9 @@
 #define __I915_SELFTEST_H__
 
 #include <linux/types.h>
+#ifdef __NetBSD__
+#include <linux/kernel.h>
+#endif
 
 struct pci_dev;
 struct drm_i915_private;

@@ -42,11 +42,19 @@ __KERNEL_RCSID(0, "$NetBSD: kvmgt.c,v 1.2 2021/12/18 23:45:31 riastradh Exp $");
 #include <linux/list.h>
 #include <linux/rbtree.h>
 #include <linux/spinlock.h>
+#ifdef __NetBSD__
+
+#else
 #include <linux/eventfd.h>
+#endif
 #include <linux/uuid.h>
+#ifdef __NetBSD__
+
+#else
 #include <linux/kvm_host.h>
 #include <linux/vfio.h>
 #include <linux/mdev.h>
+#endif
 #include <linux/debugfs.h>
 
 #include <linux/nospec.h>

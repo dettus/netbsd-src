@@ -33,12 +33,20 @@
 __KERNEL_RCSID(0, "$NetBSD: i915_gpu_error.c,v 1.13 2021/12/19 12:25:46 riastradh Exp $");
 
 #include <sys/param.h>
+#ifdef __NetBSD__
+
+#else
 #include <linux/ascii85.h>
 #include <linux/nmi.h>
+#endif
 #include <linux/pagevec.h>
 #include <linux/scatterlist.h>
+#ifdef __NetBSD__
+
+#else
 #include <linux/utsname.h>
 #include <linux/zlib.h>
+#endif
 
 #include <drm/drm_print.h>
 

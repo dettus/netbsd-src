@@ -9,7 +9,11 @@
 #include <sys/cdefs.h>
 __KERNEL_RCSID(0, "$NetBSD: selftest_timeline.c,v 1.2 2021/12/18 23:45:30 riastradh Exp $");
 
+#ifdef __NetBSD__
+
+#else
 #include <linux/prime_numbers.h>
+#endif
 
 #include "intel_engine_pm.h"
 #include "intel_gt.h"

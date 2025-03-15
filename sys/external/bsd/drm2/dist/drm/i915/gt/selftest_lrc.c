@@ -9,7 +9,11 @@
 #include <sys/cdefs.h>
 __KERNEL_RCSID(0, "$NetBSD: selftest_lrc.c,v 1.2 2021/12/18 23:45:30 riastradh Exp $");
 
+#ifdef __NetBSD__
+
+#else
 #include <linux/prime_numbers.h>
+#endif
 
 #include "gem/i915_gem_pm.h"
 #include "gt/intel_engine_heartbeat.h"
@@ -20,7 +24,11 @@ __KERNEL_RCSID(0, "$NetBSD: selftest_lrc.c,v 1.2 2021/12/18 23:45:30 riastradh E
 #include "selftests/igt_flush_test.h"
 #include "selftests/igt_live_test.h"
 #include "selftests/igt_spinner.h"
+#ifdef __NetBSD__
+
+#else
 #include "selftests/lib_sw_fence.h"
+#endif
 
 #include "gem/selftests/igt_gem_utils.h"
 #include "gem/selftests/mock_context.h"
