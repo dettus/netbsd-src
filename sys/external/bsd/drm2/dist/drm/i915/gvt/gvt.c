@@ -42,8 +42,12 @@ __KERNEL_RCSID(0, "$NetBSD: gvt.c,v 1.2 2021/12/18 23:45:31 riastradh Exp $");
 #include "i915_drv.h"
 #include "intel_gvt.h"
 #include "gvt.h"
+#ifdef __NetBSD__
+
+#else
 #include <linux/vfio.h>
 #include <linux/mdev.h>
+#endif
 
 struct intel_gvt_host intel_gvt_host;
 

@@ -36,7 +36,11 @@
 #include <linux/types.h>
 #include <linux/stringify.h>
 #include <linux/tracepoint.h>
+#ifdef __NetBSD__
+
+#else
 #include <asm/tsc.h>
+#endif
 
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM gvt

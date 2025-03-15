@@ -34,7 +34,11 @@
 __KERNEL_RCSID(0, "$NetBSD: dmabuf.c,v 1.3 2021/12/19 11:06:55 riastradh Exp $");
 
 #include <linux/dma-buf.h>
+#ifdef __NetBSD__
+
+#else
 #include <linux/vfio.h>
+#endif
 
 #include "i915_drv.h"
 #include "gvt.h"

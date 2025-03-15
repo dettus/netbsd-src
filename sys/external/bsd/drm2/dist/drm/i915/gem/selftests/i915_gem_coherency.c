@@ -9,7 +9,11 @@
 #include <sys/cdefs.h>
 __KERNEL_RCSID(0, "$NetBSD: i915_gem_coherency.c,v 1.2 2021/12/18 23:45:30 riastradh Exp $");
 
+#ifdef __NetBSD__
+
+#else
 #include <linux/prime_numbers.h>
+#endif
 
 #include "gt/intel_engine_pm.h"
 #include "gt/intel_gt.h"

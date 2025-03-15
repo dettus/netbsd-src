@@ -34,7 +34,12 @@
 __KERNEL_RCSID(0, "$NetBSD: firmware.c,v 1.2 2021/12/18 23:45:31 riastradh Exp $");
 
 #include <linux/firmware.h>
+
+#ifdef __NetBSD__
+
+#else
 #include <linux/crc32.h>
+#endif
 
 #include "i915_drv.h"
 #include "gvt.h"

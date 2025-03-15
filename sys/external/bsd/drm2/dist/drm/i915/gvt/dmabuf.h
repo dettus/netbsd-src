@@ -32,7 +32,11 @@
 
 #ifndef _GVT_DMABUF_H_
 #define _GVT_DMABUF_H_
+#ifdef	__NetBSD__
+
+#else
 #include <linux/vfio.h>
+#endif
 
 struct intel_vgpu_fb_info {
 	__u64 start;
